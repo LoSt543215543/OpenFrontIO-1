@@ -132,39 +132,18 @@ export function closestTwoTiles(
     return null;
   }
 
-  let i = 0;
-  let j = 0;
   let minDistance = Infinity;
   let result = { x: xSorted[0], y: ySorted[0] };
 
-  while (i < xSorted.length && j < ySorted.length) {
-    const currentX = xSorted[i];
-    const currentY = ySorted[j];
-
-    const cxX = currentX % w;
-    const cyX = currentY % w;
-    const distance =
-      Math.abs(cxX - cyX) +
-      Math.abs(((currentX / w) | 0) - ((currentY / w) | 0));
-
-    if (distance < minDistance) {
-      minDistance = distance;
-      result = { x: currentX, y: currentY };
-    }
-
-    // If we're at the end of X, must move Y forward
-    if (i === xSorted.length - 1) {
-      j++;
-    }
-    // If we're at the end of Y, must move X forward
-    else if (j === ySorted.length - 1) {
-      i++;
-    }
-    // Otherwise, move whichever pointer has smaller x value
-    else if (cxX < cyX) {
-      i++;
-    } else {
-      j++;
+  for (const cx of xSorted) {
+    for (const cy of ySorted) {
+      const dx = Math.abs((cx % w) - (cy % w));
+      if (dx >= minDistance && cy % w > cx % w) break;
+      const dist = dx + Math.abs(((cx / w) | 0) - ((cy / w) | 0));
+      if (dist < minDistance) {
+        minDistance = dist;
+        result = { x: cx, y: cy };
+      }
     }
   }
 
