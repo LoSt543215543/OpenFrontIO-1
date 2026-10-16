@@ -75,6 +75,7 @@ export class PlayerProfileModal extends BaseModal {
   private wantsProgressionTab = false;
   // Counts fresh openings, to key the profile card's once-per-open flourish.
   private openCount = 0;
+  private tabSwitchCount = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -318,7 +319,7 @@ export class PlayerProfileModal extends BaseModal {
             .clanTag=${this.clans[0]?.tag ?? null}
             .progress=${view.progress}
             .provisional=${view.provisional}
-            .openKey=${`profile-${this.openCount}`}
+            .openKey=${`profile-${this.openCount}-${this.tabSwitchCount}`}
           ></profile-card>`}
       <profile-share
         class="mb-[18px] block"
@@ -343,7 +344,7 @@ export class PlayerProfileModal extends BaseModal {
       .confirmedLevel=${view.confirmedLevel}
       .provisional=${view.provisional}
       .publicId=${this.publicId}
-      .popKey=${`profile-${this.openCount}`}
+      .popKey=${`profile-${this.openCount}-${this.tabSwitchCount}`}
     ></profile-progression>`;
   }
 
@@ -488,6 +489,7 @@ export class PlayerProfileModal extends BaseModal {
     // A new opening: the profile card plays its flourish again.
     // Counted across every profile modal, so no two openings share a key.
     this.openCount = ++profileOpenings;
+    this.tabSwitchCount = 0;
     this.publicId = publicId;
     this.username = null;
     this.statsTree = null;
@@ -615,9 +617,9 @@ export class PlayerProfileModal extends BaseModal {
     this.close();
     if (openedFrom === "clan") {
       document
-        .querySelector<HTMLElement & { returnFromPlayerProfile(): void }>(
-          "clan-modal",
-        )
+        .querySelector<
+          HTMLElement & { returnFromPlayerProfile(): void }
+        >("clan-modal")
         ?.returnFromPlayerProfile();
     } else if (openedFrom === "leaderboard") {
       document
@@ -625,10 +627,15 @@ export class PlayerProfileModal extends BaseModal {
         ?.open();
     } else if (openedFrom === "account") {
       document
-        .querySelector<HTMLElement & { returnToFriends(): void }>(
-          "account-modal",
-        )
+        .querySelector<
+          HTMLElement & { returnToFriends(): void }
+        >("account-modal")
         ?.returnToFriends();
     }
+  }
+
+  protected onTabEnter(tab: string): void {
+    super.onTabEnter(tab);
+    this.tabSwitchCount++;
   }
 }

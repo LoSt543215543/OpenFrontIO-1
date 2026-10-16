@@ -21,6 +21,7 @@ import { translateText } from "../Utils";
 import { prefersReducedMotion } from "../utilities/ReducedMotion";
 import { describeFlareCosmetic, type FlareCosmeticView } from "./FlareCosmetic";
 import "./LevelBadge";
+import { renderLoadingSpinner } from "./BaseModal";
 import { SECTION, SECTION_TITLE } from "./ProgressionSection";
 import type { RewardsChangedDetail } from "./RewardsPanel";
 
@@ -271,26 +272,56 @@ export class ProfileProgression extends LitElement {
     const timer = setTimeout(() => {
       if (token === this.loadToken) this.ready = true;
     }, TRACK_WAIT_MS);
-    const [config, me, trackModule] = await Promise.all([
+
+    const [config, trackModule] = await Promise.all([
       this.loadConfig().catch(() => false as const),
-      this.loadOwnAccount(publicId),
       this.loadTrackModule().catch((err: unknown) => {
         console.warn("ProfileProgression: reward track failed to load", err);
         return null;
       }),
     ]);
-    clearTimeout(timer);
+
+    // Check cached account first to render immediately if available without a black screen.
+    const cached = await this.loadUserMe().catch(() => false as const);
     if (token !== this.loadToken) return;
-    this.track =
+
+    if (
       trackModule !== null &&
       config !== false &&
       trackModule.trackHasRewards(config)
-        ? {
-            config,
-            ...ownRewards(me, publicId),
-            model: trackModule.rewardTrackModel,
-          }
-        : null;
+    ) {
+      this.track = {
+        config,
+        ...ownRewards(cached, publicId),
+        model: trackModule.rewardTrackModel,
+      };
+      this.ready = true;
+    }
+
+    // If viewing own account, read fresh rewards from server to catch any newly passed levels
+    if (
+      publicId !== null &&
+      cached !== false &&
+      cached.player.publicId === publicId
+    ) {
+      invalidateUserMe();
+      const fresh = await this.loadUserMe().catch(() => false as const);
+      clearTimeout(timer);
+      if (token !== this.loadToken) return;
+      if (
+        trackModule !== null &&
+        config !== false &&
+        trackModule.trackHasRewards(config)
+      ) {
+        this.track = {
+          config,
+          ...ownRewards(fresh, publicId),
+          model: trackModule.rewardTrackModel,
+        };
+      }
+    } else {
+      clearTimeout(timer);
+    }
     this.ready = true;
   }
 
@@ -475,7 +506,10 @@ export class ProfileProgression extends LitElement {
 
   render() {
     const progress = this.progress;
-    if (progress === null || !this.ready) return nothing;
+    if (progress === null) return nothing;
+    if (!this.ready) {
+      return renderLoadingSpinner(translateText("common.loading"));
+    }
     const track = this.track;
     return html`
       ${track === null

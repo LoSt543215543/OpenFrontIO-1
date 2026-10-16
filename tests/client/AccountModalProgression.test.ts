@@ -398,7 +398,7 @@ describe("AccountModal — Progression tab", () => {
         progression()?.querySelector("[data-milestones]") ?? null,
       ).not.toBeNull();
     });
-    expect(progression()!.classList.contains("pp-anim")).toBe(false);
+    expect(progression()!.classList.contains("pp-anim")).toBe(true);
 
     // A new opening pops in again, with the progress read afresh.
     modal.close();

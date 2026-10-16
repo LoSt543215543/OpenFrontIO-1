@@ -100,6 +100,7 @@ export class AccountModal extends BaseModal {
   // Counts openings, to key the profile card's and the Progression tab's
   // once-per-open flourish.
   private openCount = 0;
+  private tabSwitchCount = 0;
   // Replaceable for tests.
   loadPrestigeFlow: () => Promise<unknown> = loadPrestigeFlow;
   // The Progression tab's progress: the public one, which has the prestige
@@ -505,7 +506,7 @@ export class AccountModal extends BaseModal {
       .confirmedLevel=${view.confirmedLevel}
       .provisional=${view.provisional}
       .publicId=${publicId}
-      .popKey=${`account-${this.openCount}`}
+      .popKey=${`account-${this.openCount}-${this.tabSwitchCount}`}
       @rewards-changed=${this.handleTrackRewardsChanged}
     ></profile-progression>`;
   }
@@ -647,7 +648,7 @@ export class AccountModal extends BaseModal {
       .clanTag=${player.clans?.[0]?.tag ?? null}
       .progress=${view.progress}
       .provisional=${view.provisional}
-      .openKey=${`account-${this.openCount}`}
+      .openKey=${`account-${this.openCount}-${this.tabSwitchCount}`}
       prestigeable
       @prestige-request=${this.handlePrestigeRequest}
     ></profile-card>`;
@@ -1197,6 +1198,7 @@ export class AccountModal extends BaseModal {
     // Counted across every account modal, as the profile counts its own, so
     // no two openings share a key.
     const opening = (this.openCount = ++accountOpenings);
+    this.tabSwitchCount = 0;
     this.dropProgression();
     this.isLoadingUser = true;
     this.requestedTab = typeof args?.tab === "string" ? args.tab : null;
@@ -1228,6 +1230,11 @@ export class AccountModal extends BaseModal {
     this.dispatchEvent(
       new CustomEvent("close", { bubbles: true, composed: true }),
     );
+  }
+
+  protected onTabEnter(tab: string): void {
+    super.onTabEnter(tab);
+    this.tabSwitchCount++;
   }
 
   private async handleLogout() {
