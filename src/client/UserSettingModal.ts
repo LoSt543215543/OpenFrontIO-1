@@ -1869,6 +1869,14 @@ export class UserSettingModal extends BaseModal {
         @change=${this.toggleSnapBuildPreview}
       ></setting-toggle>
 
+      <setting-toggle
+        label="${translateText("user_setting.prevent_stacking")}"
+        description="${translateText("user_setting.prevent_stacking_opt_desc")}"
+        id="prevent-stacking-toggle"
+        .checked=${this.userSettings.preventStacking()}
+        @change=${() => this.userSettings.togglePreventStacking()}
+      ></setting-toggle>
+
       <!-- 🖱️ Left Click Menu -->
       <setting-toggle
         label="${translateText("user_setting.left_click_label")}"

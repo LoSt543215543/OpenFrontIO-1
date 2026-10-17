@@ -2665,6 +2665,7 @@
     "press_a_key": "Press a key",
     "prevent_stacking": "Prevent Building Stacking",
     "prevent_stacking_desc": "Hold to build a new structure instead of upgrading a nearby one. Normal placement restrictions still apply.",
+    "prevent_stacking_opt_desc": "Build separate structures by default instead of upgrading nearby ones.",
     "quick_chat": "Quick Chat",
     "quick_chat_desc": "Open quick chat for the player whose tile is under your cursor.",
     "render_debug_gui": "Render Debug GUI",

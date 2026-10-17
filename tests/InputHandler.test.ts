@@ -2216,4 +2216,16 @@ describe("InputHandler teardown (OPE-411)", () => {
       vi.useRealTimers();
     }
   });
+
+  test("syncs preventStacking", () => {
+    const st = { preventStacking: () => false };
+    const h = { userSettings: st, uiState: {} as any };
+    for (const s of [false, true]) {
+      st.preventStacking = () => s;
+      for (const held of [false, true]) {
+        InputHandler.prototype["syncPreventStacking"].call(h, held);
+        expect(h.uiState.preventStacking).toBe(s !== held);
+      }
+    }
+  });
 });

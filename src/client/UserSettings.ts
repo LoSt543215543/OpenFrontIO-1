@@ -505,6 +505,13 @@ export class UserSettings {
     this.setBool("settings.snapBuildPreview", !this.snapBuildPreview());
   }
 
+  preventStacking() {
+    return this.getBool("settings.preventStacking", false);
+  }
+  togglePreventStacking() {
+    this.setBool("settings.preventStacking", !this.preventStacking());
+  }
+
   toggleLeftClickOpenMenu() {
     this.setBool("settings.leftClickOpensMenu", !this.leftClickOpensMenu());
   }

@@ -339,6 +339,10 @@ export class InputHandler {
       `${USER_SETTINGS_CHANGED_EVENT}:${KEYBINDS_KEY}`,
       this.onKeybindsChanged,
     );
+    globalThis.addEventListener(
+      `${USER_SETTINGS_CHANGED_EVENT}:settings.preventStacking`,
+      this.onKeybindsChanged,
+    );
 
     // Listen for warship selection to change cursor. Held in a field so
     // destroy() can release it: the EventBus is created once per page in
@@ -425,9 +429,13 @@ export class InputHandler {
     this.multiSelectionActive = false;
   }
 
+  private syncPreventStacking(held = false) {
+    this.uiState.preventStacking = this.userSettings.preventStacking() !== held;
+  }
+
   /** Re-read the player's keybinds and rebuild the key dispatch table. */
   private buildKeybindTable() {
-    this.uiState.preventStacking = false;
+    this.syncPreventStacking();
     this.keybinds = this.userSettings.keybinds(Platform.isMac);
     this.keybindAndEvent = [];
 
@@ -664,7 +672,7 @@ export class InputHandler {
       "blur",
       () => {
         this.activeKeys.clear();
-        this.uiState.preventStacking = false;
+        this.syncPreventStacking();
         if (this.alternateView) {
           this.alternateView = false;
           this.eventBus.emit(new AlternateViewEvent(false));
@@ -767,7 +775,7 @@ export class InputHandler {
         }
 
         if (this.keybindMatchesEvent(e, this.keybinds.preventStacking)) {
-          this.uiState.preventStacking = true;
+          this.syncPreventStacking(true);
         }
         if (this.keybindMatchesEvent(e, this.keybinds.toggleView)) {
           e.preventDefault();
@@ -887,7 +895,7 @@ export class InputHandler {
       (e) => {
         const hold = this.parseKeybind(this.keybinds.preventStacking);
         if (e.code === hold.code || (hold.shift && !e.shiftKey)) {
-          this.uiState.preventStacking = false;
+          this.syncPreventStacking();
         }
         const isTextInput = this.isTextInputTarget(e.target);
         if (isTextInput && !this.activeKeys.has(e.code)) {
@@ -1553,6 +1561,10 @@ export class InputHandler {
     }
     globalThis.removeEventListener(
       `${USER_SETTINGS_CHANGED_EVENT}:${KEYBINDS_KEY}`,
+      this.onKeybindsChanged,
+    );
+    globalThis.removeEventListener(
+      `${USER_SETTINGS_CHANGED_EVENT}:settings.preventStacking`,
       this.onKeybindsChanged,
     );
     this.listenerAbort?.abort();
