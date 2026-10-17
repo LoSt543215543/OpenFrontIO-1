@@ -118,8 +118,12 @@ export class ShellExecution implements Execution {
     return this.effectOnTarget();
   }
 
+  targetUnit(): Unit {
+    return this.target;
+  }
+
   isActive(): boolean {
-    return this.active;
+    return this.active && (this.shell === undefined || this.shell.isActive());
   }
   activeDuringSpawnPhase(): boolean {
     return false;

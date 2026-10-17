@@ -40,7 +40,7 @@ export class WarshipExecution implements Execution {
   private mg: Game;
   private pathfinder: WaterPathFinder;
   private lastShellAttack = 0;
-  private alreadySentShell = new Set<Unit>();
+  private inFlightShells = new Set<ShellExecution>();
   private lastManualMoveTickRetreatDisabled = 0;
   private lastObservedPatrolTile: TileRef | undefined;
   private activeHealingRemainder = 0;
@@ -297,7 +297,7 @@ export class WarshipExecution implements Execution {
         unit === this.warship ||
         unit.owner() === owner ||
         !owner.canAttackPlayer(unit.owner(), true) ||
-        this.alreadySentShell.has(unit) ||
+        this.hasInFlightShell(unit) ||
         (unit.type() === UnitType.Warship &&
           unit.warshipState().state === "docked")
       ) {
@@ -659,21 +659,31 @@ export class WarshipExecution implements Execution {
         // Warships don't need to reload when attacking transport ships.
         this.lastShellAttack = this.mg.ticks();
       }
-      this.mg.addExecution(
-        new ShellExecution(
-          this.warship.tile(),
-          this.warship.owner(),
-          this.warship,
-          this.warship.targetUnit()!,
-        ),
+      const shell = new ShellExecution(
+        this.warship.tile(),
+        this.warship.owner(),
+        this.warship,
+        this.warship.targetUnit()!,
       );
+      this.mg.addExecution(shell);
       if (!this.warship.targetUnit()!.hasHealth()) {
         // Don't send multiple shells to target that can be oneshotted
-        this.alreadySentShell.add(this.warship.targetUnit()!);
+        this.inFlightShells.add(shell);
         this.warship.setTargetUnit(undefined);
         return;
       }
     }
+  }
+
+  private hasInFlightShell(target: Unit): boolean {
+    for (const shell of this.inFlightShells) {
+      if (!shell.isActive()) {
+        this.inFlightShells.delete(shell);
+      } else if (shell.targetUnit() === target) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private huntDownTradeShip() {
@@ -859,7 +869,9 @@ export class WarshipExecution implements Execution {
           ? null
           : waterPathFinderState(this.pathfinder),
       lastShellAttack: this.lastShellAttack,
-      alreadySentShell: [...this.alreadySentShell].map((u) => w.unit(u)),
+      inFlightShells: [...this.inFlightShells]
+        .filter((s) => s.isActive())
+        .map((s) => w.exec(s)),
       lastManualMoveTickRetreatDisabled: this.lastManualMoveTickRetreatDisabled,
       lastObservedPatrolTile: this.lastObservedPatrolTile,
       activeHealingRemainder: this.activeHealingRemainder,
@@ -879,7 +891,9 @@ export class WarshipExecution implements Execution {
       this.pathfinder = restoreWaterPathFinder(r.game, s.pathfinder);
     }
     this.lastShellAttack = s.lastShellAttack;
-    this.alreadySentShell = new Set(s.alreadySentShell.map((i) => r.unit(i)));
+    this.inFlightShells = new Set(
+      s.inFlightShells?.map((i) => r.exec<ShellExecution>(i)) ?? [],
+    );
     this.lastManualMoveTickRetreatDisabled =
       s.lastManualMoveTickRetreatDisabled;
     this.lastObservedPatrolTile = s.lastObservedPatrolTile;
@@ -901,7 +915,8 @@ const WarshipExecutionStateSchema = z.object({
   pathfinder: WaterPathFinderSchema.nullable(),
   lastShellAttack: zInt(),
   /** In insertion order. */
-  alreadySentShell: z.array(zRef()),
+  alreadySentShell: z.array(zRef()).optional(),
+  inFlightShells: z.array(zRef()).optional(),
   lastManualMoveTickRetreatDisabled: zInt(),
   lastObservedPatrolTile: zTile().optional(),
   activeHealingRemainder: zNum(),

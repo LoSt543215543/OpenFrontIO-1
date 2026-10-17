@@ -1069,4 +1069,33 @@ describe("Warship", () => {
 
     expect(warship.warshipState().patrolTile).toBe(game.ref(coastX + 1, 10));
   });
+
+  test("Warship fires at transport ship again if in-flight shell is destroyed", async () => {
+    game.config().warshipShellAttackRate = () => 0;
+
+    const warship = player1.buildUnit(
+      UnitType.Warship,
+      game.ref(coastX + 1, 10),
+      { patrolTile: game.ref(coastX + 1, 10) },
+    );
+    game.addExecution(new WarshipExecution(warship));
+
+    const enemyTransport = player2.buildUnit(
+      UnitType.TransportShip,
+      game.ref(coastX + 5, 10),
+      { targetTile: game.ref(coastX + 5, 10) },
+    );
+
+    executeTicks(game, 3);
+    const shells = player1.units(UnitType.Shell);
+    expect(shells).toHaveLength(1);
+
+    // Destroy shell mid-flight (e.g. by missile or nuke explosion)
+    shells[0].delete(false);
+    expect(enemyTransport.isActive()).toBe(true);
+
+    // Warship re-acquires transport ship and fires another shell which sinks it
+    executeTicks(game, 2);
+    expect(enemyTransport.isActive()).toBe(false);
+  });
 });
