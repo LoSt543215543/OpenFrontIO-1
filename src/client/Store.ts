@@ -27,6 +27,7 @@ import "./components/PurchaseButton";
 import { alignPurchaseRows } from "./components/PurchaseButton";
 import "./components/TribesPanel";
 import { modalHeader } from "./components/ui/ModalHeader";
+import { styledSelect } from "./components/ui/StyledSelect";
 import {
   fetchCosmetics,
   findPackItem,
@@ -66,6 +67,14 @@ type StoreTab =
 const COSMETICS_SUB_TABS = ["patterns", "new", "flags", "crowns"] as const;
 type CosmeticsSubTab = (typeof COSMETICS_SUB_TABS)[number];
 
+export type StoreCurrencyFilter = "all" | "caps" | "plutonium";
+export type StoreSortOption =
+  | "default"
+  | "newest"
+  | "oldest"
+  | "price_asc"
+  | "price_desc";
+
 /** Sub-tab holding the catalog item a store deep link points at. */
 export function subTabForItem(itemKey: string): CosmeticsSubTab {
   if (itemKey.startsWith("crown:")) return "crowns";
@@ -99,6 +108,8 @@ export class StoreModal extends BaseModal {
   // not wait on a slow catalog before it may say so.
   @state() private authSettled = false;
   @state() private search = "";
+  @state() private currencyFilter: StoreCurrencyFilter = "all";
+  @state() private sortBy: StoreSortOption = "default";
   private cosmeticsSubTab: CosmeticsSubTab = "patterns";
   // Item the URL asked for (`#modal=store&item=<key>`). Held until its group
   // is visible, then inspected so the store opens on that item.
@@ -235,6 +246,53 @@ export class StoreModal extends BaseModal {
     this.requestUpdate();
   }
 
+  private handleCurrencyFilter(filter: StoreCurrencyFilter): void {
+    this.currencyFilter = filter;
+    this.selectVisible(this.cosmeticsGroups(this.cosmeticsSubTab));
+    this.requestUpdate();
+  }
+
+  private handleSort(sort: StoreSortOption): void {
+    this.sortBy = sort;
+    this.selectVisible(this.cosmeticsGroups(this.cosmeticsSubTab));
+    this.requestUpdate();
+  }
+
+  private clearFilters(): void {
+    this.search = "";
+    this.currencyFilter = "all";
+    this.sortBy = "default";
+    this.selectVisible(this.cosmeticsGroups(this.cosmeticsSubTab));
+    this.requestUpdate();
+  }
+
+  private get hasActiveFilters(): boolean {
+    return (
+      this.search.trim() !== "" ||
+      this.currencyFilter !== "all" ||
+      this.sortBy !== "default"
+    );
+  }
+
+  private groupEffectivePrice(group: readonly ResolvedCosmetic[]): number {
+    for (const item of group) {
+      const c = item.cosmetic as {
+        priceHard?: number;
+        priceSoft?: number;
+      } | null;
+      if (this.currencyFilter === "caps") {
+        if (c?.priceSoft !== undefined && c.priceSoft > 0) return c.priceSoft;
+      } else if (this.currencyFilter === "plutonium") {
+        if (c?.priceHard !== undefined && c.priceHard > 0) return c.priceHard;
+      } else {
+        if (c?.priceSoft !== undefined && c.priceSoft > 0) return c.priceSoft;
+        if (c?.priceHard !== undefined && c.priceHard > 0)
+          return c.priceHard * 25;
+      }
+    }
+    return 0;
+  }
+
   private newCosmeticKeys(): Set<string> {
     const items = this.resolvedPurchasables();
     const allSkins = groupCosmeticVariants(
@@ -251,49 +309,37 @@ export class StoreModal extends BaseModal {
     tab: CosmeticsSubTab,
   ): readonly (readonly ResolvedCosmetic[])[] {
     const items = this.resolvedPurchasables();
+    let baseGroups: readonly (readonly ResolvedCosmetic[])[];
     if (tab === "flags") {
-      return items
-        .filter(
-          (resolved) =>
-            resolved.type === "flag" &&
-            (resolved.cosmetic === null ||
-              this.includedInSearch(resolved.cosmetic.name)),
-        )
+      baseGroups = items
+        .filter((resolved) => resolved.type === "flag")
         .map((r) => [r]);
-    }
-    if (tab === "crowns") {
-      return items
-        .filter(
-          (resolved) =>
-            resolved.type === "crown" &&
-            (resolved.cosmetic === null ||
-              this.includedInSearch(resolved.cosmetic.name)),
-        )
+    } else if (tab === "crowns") {
+      baseGroups = items
+        .filter((resolved) => resolved.type === "crown")
         .map((r) => [r]);
-    }
-    const allSkins = groupCosmeticVariants(
-      items.filter(
-        (resolved) => resolved.type === "pattern" || resolved.type === "skin",
-      ),
-    );
-    if (tab === "new") {
+    } else if (tab === "new") {
+      const allSkins = groupCosmeticVariants(
+        items.filter(
+          (resolved) => resolved.type === "pattern" || resolved.type === "skin",
+        ),
+      );
       const explicitNew = allSkins.filter((g) =>
         g.some(
           (r) => (r.cosmetic as { isNew?: boolean } | null)?.isNew === true,
         ),
       );
-      const newGroups =
+      baseGroups =
         explicitNew.length > 0 ? explicitNew : allSkins.slice(-8).reverse();
-      return newGroups.filter((group) =>
-        group.some(
-          (r) =>
-            (r.cosmetic !== null && this.includedInSearch(r.cosmetic.name)) ||
-            (r.colorPalette !== null &&
-              this.includedInSearch(r.colorPalette.name)),
+    } else {
+      baseGroups = groupCosmeticVariants(
+        items.filter(
+          (resolved) => resolved.type === "pattern" || resolved.type === "skin",
         ),
       );
     }
-    return allSkins.filter((group) =>
+
+    let filtered = baseGroups.filter((group) =>
       group.some(
         (r) =>
           (r.cosmetic !== null && this.includedInSearch(r.cosmetic.name)) ||
@@ -301,6 +347,38 @@ export class StoreModal extends BaseModal {
             this.includedInSearch(r.colorPalette.name)),
       ),
     );
+
+    if (this.currencyFilter === "caps") {
+      filtered = filtered.filter((group) =>
+        group.some((r) => {
+          const c = r.cosmetic as { priceSoft?: number } | null;
+          return c?.priceSoft !== undefined && c.priceSoft > 0;
+        }),
+      );
+    } else if (this.currencyFilter === "plutonium") {
+      filtered = filtered.filter((group) =>
+        group.some((r) => {
+          const c = r.cosmetic as { priceHard?: number } | null;
+          return c?.priceHard !== undefined && c.priceHard > 0;
+        }),
+      );
+    }
+
+    if (this.sortBy === "newest") {
+      filtered = tab === "new" ? filtered : [...filtered].reverse();
+    } else if (this.sortBy === "oldest") {
+      filtered = tab === "new" ? [...filtered].reverse() : filtered;
+    } else if (this.sortBy === "price_asc") {
+      filtered = [...filtered].sort(
+        (a, b) => this.groupEffectivePrice(a) - this.groupEffectivePrice(b),
+      );
+    } else if (this.sortBy === "price_desc") {
+      filtered = [...filtered].sort(
+        (a, b) => this.groupEffectivePrice(b) - this.groupEffectivePrice(a),
+      );
+    }
+
+    return filtered;
   }
 
   private groupsForTab(tab: string): readonly (readonly ResolvedCosmetic[])[] {
@@ -408,6 +486,8 @@ export class StoreModal extends BaseModal {
   protected onTabEnter(key: string): void {
     if (key !== "cosmetics") {
       this.search = "";
+      this.currencyFilter = "all";
+      this.sortBy = "default";
     }
     this.selectVisible(this.groupsForTab(key));
     this.requestUpdate();
@@ -592,14 +672,14 @@ export class StoreModal extends BaseModal {
   ): TemplateResult {
     const page = this.pages.page(
       "store-grid",
-      `${this.affiliateCode ?? ""}:${this.activeTab}:${this.cosmeticsSubTab}:${this.search}`,
+      `${this.affiliateCode ?? ""}:${this.activeTab}:${this.cosmeticsSubTab}:${this.search}:${this.currencyFilter}:${this.sortBy}`,
       groups,
     );
     const cards =
       groups.length === 0
         ? options.trailingContent
           ? html``
-          : this.search.trim() !== ""
+          : this.hasActiveFilters
             ? html`<div
                 data-store-empty-search
                 class="col-span-full flex flex-col items-center justify-center gap-3 py-12 text-center"
@@ -618,17 +698,19 @@ export class StoreModal extends BaseModal {
                   />
                 </svg>
                 <div class="text-sm font-semibold text-white/60">
-                  ${translateText("store.no_search_results", {
-                    query: this.search.trim(),
-                  })}
+                  ${this.search.trim() !== ""
+                    ? translateText("store.no_search_results", {
+                        query: this.search.trim(),
+                      })
+                    : translateText("store.no_filter_results")}
                 </div>
                 <button
                   type="button"
                   data-store-clear-search-btn
-                  class="rounded-lg bg-white/10 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-white/20"
-                  @click=${() => this.clearSearch()}
+                  class="rounded-lg bg-white/10 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-white/20 cursor-pointer"
+                  @click=${() => this.clearFilters()}
                 >
-                  ${translateText("store.clear_search")}
+                  ${translateText("store.clear_filters")}
                 </button>
               </div>`
             : html`<div
@@ -660,83 +742,127 @@ export class StoreModal extends BaseModal {
             ? "store.no_new_skins"
             : "store.no_skins";
     return html`
-      <div
-        class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 px-4 py-1"
-      >
-        <div class="flex items-center gap-1 sm:gap-2 overflow-x-auto">
-          ${COSMETICS_SUB_TABS.map((tab) => {
-            const active = this.cosmeticsSubTab === tab;
-            return html`<button
-              class="-mb-px whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${active
-                ? "border-malibu-blue text-aquarius"
-                : "border-transparent text-white/40 hover:text-white/70"}"
-              @click=${() => this.setCosmeticsSubTab(tab)}
-            >
-              ${translateText(`store.${tab}`)}
-            </button>`;
-          })}
-        </div>
+      <div class="flex flex-col gap-2.5 border-b border-white/10 px-4 py-2">
         <div
-          class="relative flex items-center min-w-48 sm:max-w-64 pb-2 sm:pb-0"
+          class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
         >
-          <input
-            data-store-search
-            type="text"
-            class="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-1.5 pl-8 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-malibu-blue focus:ring-1 focus:ring-malibu-blue"
-            placeholder=${translateText("store.search_placeholder")}
-            .value=${this.search}
-            @input=${(e: Event) => this.handleSearch(e)}
-          />
-          <svg
-            class="pointer-events-none absolute left-2.5 h-4 w-4 text-white/40"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          <div class="flex items-center gap-1 sm:gap-2 overflow-x-auto">
+            ${COSMETICS_SUB_TABS.map((tab) => {
+              const active = this.cosmeticsSubTab === tab;
+              return html`<button
+                class="-mb-px whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${active
+                  ? "border-malibu-blue text-aquarius"
+                  : "border-transparent text-white/40 hover:text-white/70"}"
+                @click=${() => this.setCosmeticsSubTab(tab)}
+              >
+                ${translateText(`store.${tab}`)}
+              </button>`;
+            })}
+          </div>
+          <div class="relative flex items-center min-w-48 sm:max-w-64">
+            <input
+              data-store-search
+              type="text"
+              class="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-1.5 pl-8 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-malibu-blue focus:ring-1 focus:ring-malibu-blue"
+              placeholder=${translateText("store.search_placeholder")}
+              .value=${this.search}
+              @input=${(e: Event) => this.handleSearch(e)}
             />
-          </svg>
-          ${this.search
+            <svg
+              class="pointer-events-none absolute left-2.5 h-4 w-4 text-white/40"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+            ${this.search
+              ? html`<button
+                  type="button"
+                  data-store-search-clear
+                  aria-label=${translateText("store.clear_search")}
+                  class="absolute right-2 text-white/40 hover:text-white transition-colors cursor-pointer"
+                  @click=${() => this.clearSearch()}
+                >
+                  ✕
+                </button>`
+              : nothing}
+          </div>
+        </div>
+
+        <div
+          class="flex items-center gap-3 sm:gap-4 flex-wrap text-xs text-white/70 pt-0.5"
+        >
+          <div class="flex items-center gap-1.5" data-store-currency-filter>
+            <span
+              class="font-bold text-white/50 text-[11px] uppercase tracking-wide"
+            >
+              ${translateText("store.filter_label")}:
+            </span>
+            ${styledSelect({
+              options: [
+                { value: "all", label: translateText("store.filter_all") },
+                { value: "caps", label: translateText("store.filter_caps") },
+                {
+                  value: "plutonium",
+                  label: translateText("store.filter_plutonium"),
+                },
+              ],
+              value: this.currencyFilter,
+              onChange: (val) =>
+                this.handleCurrencyFilter(val as StoreCurrencyFilter),
+              ariaLabel: translateText("store.filter_currency_label"),
+              className: "w-32 sm:w-36",
+            })}
+          </div>
+
+          <div class="flex items-center gap-1.5" data-store-sort>
+            <span
+              class="font-bold text-white/50 text-[11px] uppercase tracking-wide"
+            >
+              ${translateText("store.sort_label")}:
+            </span>
+            ${styledSelect({
+              options: [
+                {
+                  value: "default",
+                  label: translateText("store.sort_default"),
+                },
+                { value: "newest", label: translateText("store.sort_newest") },
+                { value: "oldest", label: translateText("store.sort_oldest") },
+                {
+                  value: "price_asc",
+                  label: translateText("store.sort_price_asc"),
+                },
+                {
+                  value: "price_desc",
+                  label: translateText("store.sort_price_desc"),
+                },
+              ],
+              value: this.sortBy,
+              onChange: (val) => this.handleSort(val as StoreSortOption),
+              ariaLabel: translateText("store.sort_label"),
+              className: "w-36 sm:w-44",
+            })}
+          </div>
+
+          ${this.hasActiveFilters
             ? html`<button
                 type="button"
-                data-store-search-clear
-                aria-label=${translateText("store.clear_search")}
-                class="absolute right-2 text-white/40 hover:text-white transition-colors"
-                @click=${() => this.clearSearch()}
+                data-store-reset-filters
+                class="ml-auto text-xs font-semibold text-malibu-blue hover:text-aquarius transition-colors underline cursor-pointer"
+                @click=${() => this.clearFilters()}
               >
-                ✕
+                ${translateText("store.clear_filters")}
               </button>`
             : nothing}
         </div>
       </div>
-      ${this.cosmeticsSubTab === "new" && !this.search.trim()
-        ? html`<div
-            data-store-new-releases-banner
-            class="mx-3 mt-3 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/15 p-4 sm:p-5 shadow-lg backdrop-blur-sm"
-          >
-            <div class="flex items-center gap-3">
-              <span
-                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl ring-1 ring-amber-400/40"
-              >
-                ✨
-              </span>
-              <div>
-                <h3
-                  class="text-base sm:text-lg font-black tracking-wide text-white"
-                >
-                  ${translateText("store.new_releases_title")}
-                </h3>
-                <p class="text-xs sm:text-sm text-white/70">
-                  ${translateText("store.new_releases_subtitle")}
-                </p>
-              </div>
-            </div>
-          </div>`
-        : nothing}
       ${this.renderBrowser(this.visibleGroups, {
         emptyTranslationKey: emptyKey,
         gridClass:
