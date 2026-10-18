@@ -9,7 +9,7 @@ import {
   Subscription,
 } from "@openfront/shared/CosmeticSchemas";
 import type { PropertyValues, TemplateResult } from "lit";
-import { html } from "lit";
+import { html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { BaseModal } from "./components/BaseModal";
 import "./components/CosmeticCard";
@@ -63,7 +63,7 @@ type StoreTab =
   | "subscriptions"
   | "tribes";
 
-const COSMETICS_SUB_TABS = ["patterns", "flags", "crowns"] as const;
+const COSMETICS_SUB_TABS = ["patterns", "new", "flags", "crowns"] as const;
 type CosmeticsSubTab = (typeof COSMETICS_SUB_TABS)[number];
 
 /** Sub-tab holding the catalog item a store deep link points at. */
@@ -98,6 +98,7 @@ export class StoreModal extends BaseModal {
   // refresh() after the catalog fetch, and a settled no-session result must
   // not wait on a slow catalog before it may say so.
   @state() private authSettled = false;
+  @state() private search = "";
   private cosmeticsSubTab: CosmeticsSubTab = "patterns";
   // Item the URL asked for (`#modal=store&item=<key>`). Held until its group
   // is visible, then inspected so the store opens on that item.
@@ -215,23 +216,89 @@ export class StoreModal extends BaseModal {
     ).filter((resolved) => resolved.relationship === "purchasable");
   }
 
+  private includedInSearch(name: string): boolean {
+    if (!this.search.trim()) return true;
+    const query = this.search.trim().toLowerCase();
+    const displayName = name.replace(/_/g, " ").toLowerCase();
+    return displayName.includes(query) || name.toLowerCase().includes(query);
+  }
+
+  private handleSearch(event: Event): void {
+    this.search = (event.target as HTMLInputElement).value;
+    this.selectVisible(this.cosmeticsGroups(this.cosmeticsSubTab));
+    this.requestUpdate();
+  }
+
+  private clearSearch(): void {
+    this.search = "";
+    this.selectVisible(this.cosmeticsGroups(this.cosmeticsSubTab));
+    this.requestUpdate();
+  }
+
+  private newCosmeticKeys(): Set<string> {
+    const items = this.resolvedPurchasables();
+    const allSkins = groupCosmeticVariants(
+      items.filter((r) => r.type === "pattern" || r.type === "skin"),
+    );
+    const explicitNew = allSkins.filter((g) =>
+      g.some((r) => (r.cosmetic as { isNew?: boolean } | null)?.isNew === true),
+    );
+    const newGroups = explicitNew.length > 0 ? explicitNew : allSkins.slice(-8);
+    return new Set(newGroups.flatMap((g) => g.map((r) => r.key)));
+  }
+
   private cosmeticsGroups(
     tab: CosmeticsSubTab,
   ): readonly (readonly ResolvedCosmetic[])[] {
     const items = this.resolvedPurchasables();
     if (tab === "flags") {
       return items
-        .filter((resolved) => resolved.type === "flag")
+        .filter(
+          (resolved) =>
+            resolved.type === "flag" &&
+            (resolved.cosmetic === null ||
+              this.includedInSearch(resolved.cosmetic.name)),
+        )
         .map((r) => [r]);
     }
     if (tab === "crowns") {
       return items
-        .filter((resolved) => resolved.type === "crown")
+        .filter(
+          (resolved) =>
+            resolved.type === "crown" &&
+            (resolved.cosmetic === null ||
+              this.includedInSearch(resolved.cosmetic.name)),
+        )
         .map((r) => [r]);
     }
-    return groupCosmeticVariants(
+    const allSkins = groupCosmeticVariants(
       items.filter(
         (resolved) => resolved.type === "pattern" || resolved.type === "skin",
+      ),
+    );
+    if (tab === "new") {
+      const explicitNew = allSkins.filter((g) =>
+        g.some(
+          (r) => (r.cosmetic as { isNew?: boolean } | null)?.isNew === true,
+        ),
+      );
+      const newGroups =
+        explicitNew.length > 0 ? explicitNew : allSkins.slice(-8).reverse();
+      return newGroups.filter((group) =>
+        group.some(
+          (r) =>
+            (r.cosmetic !== null && this.includedInSearch(r.cosmetic.name)) ||
+            (r.colorPalette !== null &&
+              this.includedInSearch(r.colorPalette.name)),
+        ),
+      );
+    }
+    return allSkins.filter((group) =>
+      group.some(
+        (r) =>
+          (r.cosmetic !== null && this.includedInSearch(r.cosmetic.name)) ||
+          (r.colorPalette !== null &&
+            this.includedInSearch(r.colorPalette.name)),
       ),
     );
   }
@@ -339,6 +406,9 @@ export class StoreModal extends BaseModal {
   }
 
   protected onTabEnter(key: string): void {
+    if (key !== "cosmetics") {
+      this.search = "";
+    }
     this.selectVisible(this.groupsForTab(key));
     this.requestUpdate();
   }
@@ -402,16 +472,19 @@ export class StoreModal extends BaseModal {
     cardClass = "block h-full min-w-0",
     previewSize: "card" | "detail" = "card",
   ): TemplateResult {
+    const newKeys = this.newCosmeticKeys();
     return html`${groups.map((group) => {
       const focused = group.find((item) => item.key === this.inspected?.key);
       const active = focused ?? group[0];
       const action = this.renderCardAction(active, userHasSubscription);
+      const isNew = newKeys.has(active.key);
       return html`<cosmetic-card
         data-store-product
         data-cosmetic-key=${group[0].key}
         class=${cardClass}
         previewSize=${previewSize}
         .resolved=${group[0]}
+        .isNew=${isNew}
         .variants=${group.length > 1 ||
         group[0].type === "pattern" ||
         group[0].type === "skin"
@@ -519,18 +592,50 @@ export class StoreModal extends BaseModal {
   ): TemplateResult {
     const page = this.pages.page(
       "store-grid",
-      `${this.affiliateCode ?? ""}:${this.activeTab}:${this.cosmeticsSubTab}`,
+      `${this.affiliateCode ?? ""}:${this.activeTab}:${this.cosmeticsSubTab}:${this.search}`,
       groups,
     );
     const cards =
       groups.length === 0
         ? options.trailingContent
           ? html``
-          : html`<div
-              class=${`${options.emptyClass ?? "col-span-full"} py-8 text-center text-sm font-bold uppercase tracking-wider text-white/40`}
-            >
-              ${translateText(options.emptyTranslationKey)}
-            </div>`
+          : this.search.trim() !== ""
+            ? html`<div
+                data-store-empty-search
+                class="col-span-full flex flex-col items-center justify-center gap-3 py-12 text-center"
+              >
+                <svg
+                  class="h-8 w-8 text-white/30"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <div class="text-sm font-semibold text-white/60">
+                  ${translateText("store.no_search_results", {
+                    query: this.search.trim(),
+                  })}
+                </div>
+                <button
+                  type="button"
+                  data-store-clear-search-btn
+                  class="rounded-lg bg-white/10 px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider text-white transition-colors hover:bg-white/20"
+                  @click=${() => this.clearSearch()}
+                >
+                  ${translateText("store.clear_search")}
+                </button>
+              </div>`
+            : html`<div
+                class=${`${options.emptyClass ?? "col-span-full"} py-8 text-center text-sm font-bold uppercase tracking-wider text-white/40`}
+              >
+                ${translateText(options.emptyTranslationKey)}
+              </div>`
         : this.renderCosmeticCards(
             page.items,
             options.userHasSubscription,
@@ -551,25 +656,91 @@ export class StoreModal extends BaseModal {
         ? "store.no_flags"
         : this.cosmeticsSubTab === "crowns"
           ? "store.no_crowns"
-          : "store.no_skins";
+          : this.cosmeticsSubTab === "new"
+            ? "store.no_new_skins"
+            : "store.no_skins";
     return html`
       <div
-        class="flex items-center justify-center gap-6 border-b border-white/10 px-4"
+        class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 px-4 py-1"
       >
-        ${COSMETICS_SUB_TABS.map((tab) => {
-          const active = this.cosmeticsSubTab === tab;
-          return html`<button
-            class="-mb-px whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${active
-              ? "border-malibu-blue text-aquarius"
-              : "border-transparent text-white/40 hover:text-white/70"}"
-            @click=${() => this.setCosmeticsSubTab(tab)}
+        <div class="flex items-center gap-1 sm:gap-2 overflow-x-auto">
+          ${COSMETICS_SUB_TABS.map((tab) => {
+            const active = this.cosmeticsSubTab === tab;
+            return html`<button
+              class="-mb-px whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${active
+                ? "border-malibu-blue text-aquarius"
+                : "border-transparent text-white/40 hover:text-white/70"}"
+              @click=${() => this.setCosmeticsSubTab(tab)}
+            >
+              ${translateText(`store.${tab}`)}
+            </button>`;
+          })}
+        </div>
+        <div
+          class="relative flex items-center min-w-48 sm:max-w-64 pb-2 sm:pb-0"
+        >
+          <input
+            data-store-search
+            type="text"
+            class="w-full rounded-xl bg-white/5 border border-white/10 px-3 py-1.5 pl-8 text-sm text-white placeholder-white/30 outline-none transition-all focus:border-malibu-blue focus:ring-1 focus:ring-malibu-blue"
+            placeholder=${translateText("store.search_placeholder")}
+            .value=${this.search}
+            @input=${(e: Event) => this.handleSearch(e)}
+          />
+          <svg
+            class="pointer-events-none absolute left-2.5 h-4 w-4 text-white/40"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
           >
-            ${translateText(`store.${tab}`)}
-          </button>`;
-        })}
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+          ${this.search
+            ? html`<button
+                type="button"
+                data-store-search-clear
+                aria-label=${translateText("store.clear_search")}
+                class="absolute right-2 text-white/40 hover:text-white transition-colors"
+                @click=${() => this.clearSearch()}
+              >
+                ✕
+              </button>`
+            : nothing}
+        </div>
       </div>
+      ${this.cosmeticsSubTab === "new" && !this.search.trim()
+        ? html`<div
+            data-store-new-releases-banner
+            class="mx-3 mt-3 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-indigo-500/15 p-4 sm:p-5 shadow-lg backdrop-blur-sm"
+          >
+            <div class="flex items-center gap-3">
+              <span
+                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/20 text-xl ring-1 ring-amber-400/40"
+              >
+                ✨
+              </span>
+              <div>
+                <h3
+                  class="text-base sm:text-lg font-black tracking-wide text-white"
+                >
+                  ${translateText("store.new_releases_title")}
+                </h3>
+                <p class="text-xs sm:text-sm text-white/70">
+                  ${translateText("store.new_releases_subtitle")}
+                </p>
+              </div>
+            </div>
+          </div>`
+        : nothing}
       ${this.renderBrowser(this.visibleGroups, {
         emptyTranslationKey: emptyKey,
+        gridClass:
+          "grid grid-cols-2 gap-3.5 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 p-3.5",
       })}
     `;
   }

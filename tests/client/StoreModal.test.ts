@@ -268,7 +268,9 @@ async function clickHardPurchase(modal: StoreModal) {
     .dispatchEvent(new CustomEvent("confirm"));
 }
 
-async function openStoreOnCosmetic(tab: "patterns" | "flags" | "crowns") {
+async function openStoreOnCosmetic(
+  tab: "patterns" | "new" | "flags" | "crowns",
+) {
   store = document.createElement("store-modal") as StoreModal;
   store.inline = true;
   document.body.appendChild(store);
@@ -482,6 +484,48 @@ describe("StoreModal cosmetic browser", () => {
 
     expect(modal.querySelector("[data-store-product]")).toBeNull();
     expect(modal.querySelector("purchase-button")).toBeNull();
+  });
+
+  it("filters skins in real time when searching", async () => {
+    const modal = await openStoreOnCosmetic("patterns");
+    expect(card(modal, red.key)).toBeTruthy();
+
+    const searchInput = modal.querySelector<HTMLInputElement>(
+      "[data-store-search]",
+    )!;
+    searchInput.value = "stripes";
+    searchInput.dispatchEvent(new Event("input"));
+    await modal.updateComplete;
+
+    expect(card(modal, red.key)).toBeTruthy();
+
+    searchInput.value = "nonexistent_skin_name";
+    searchInput.dispatchEvent(new Event("input"));
+    await modal.updateComplete;
+
+    expect(card(modal, red.key)).toBeFalsy();
+    expect(modal.querySelector("[data-store-empty-search]")).toBeTruthy();
+
+    const clearBtn = modal.querySelector<HTMLButtonElement>(
+      "[data-store-clear-search-btn]",
+    )!;
+    clearBtn.click();
+    await modal.updateComplete;
+
+    expect(card(modal, red.key)).toBeTruthy();
+    expect(modal.querySelector("[data-store-empty-search]")).toBeNull();
+  });
+
+  it("displays the new releases tab with a spotlight banner and badges newly released skins", async () => {
+    const modal = await openStoreOnCosmetic("new");
+    expect(
+      modal.querySelector("[data-store-new-releases-banner]"),
+    ).toBeTruthy();
+
+    const newCard = card(modal, red.key);
+    expect(newCard).toBeTruthy();
+    expect(newCard?.isNew).toBe(true);
+    expect(newCard?.querySelector("[data-cosmetic-new-badge]")).toBeTruthy();
   });
 
   it("focuses effect and nuke-subtype purchases without changing effect settings", async () => {
