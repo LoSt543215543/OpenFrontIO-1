@@ -653,9 +653,9 @@ export class GameModeSelector extends LitElement {
     const ffa = this.lobbies?.games?.["ffa"]?.[0];
     const teams = this.lobbies?.games?.["team"]?.[0];
     const special = this.lobbies?.games?.["special"]?.[0];
-    // The hero slot holds the spinner, then the FFA card; loaded without one
-    // it goes and the upcoming column takes the whole row.
-    const heroSlot = this.lobbies === null || ffa !== undefined;
+    // The hero slot is always rendered to maintain a fixed height, holding the
+    // spinner until an FFA card is available.
+    const heroSlot = true;
     // A lone secondary card takes both of the column's card rows.
     const cardRows =
       teams && special
@@ -736,10 +736,10 @@ export class GameModeSelector extends LitElement {
           heroSlot
             ? html`<div class="min-w-0 sm:col-start-1 sm:row-start-2">
                 ${
-                  ffa
+                  ffa?.gameConfig
                     ? this.renderLobbyCard(
                         ffa,
-                        getGameModeLabel(ffa.gameConfig!),
+                        getGameModeLabel(ffa.gameConfig),
                       )
                     : this.offlineForLobbies()
                       ? this.renderLobbiesUnavailable()
